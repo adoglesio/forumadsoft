@@ -1,7 +1,9 @@
 import axios from "axios";
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || "/api",
+  // Em desenvolvimento (npm run dev) sempre usa o proxy do Vite (/api -> localhost:3001),
+  // ignorando qualquer VITE_API_URL dos arquivos .env. Em produção usa a URL do backend.
+  baseURL: import.meta.env.DEV ? "/api" : (import.meta.env.VITE_API_URL || "/api"),
 });
 
 api.interceptors.response.use(
@@ -54,6 +56,9 @@ export const atualizarPerfil = (dados) =>
 export const alterarSenha = (dados) =>
   api.put("/usuarios/senha", dados).then((r) => r.data.success);
 
+export const listarUsuariosBasico = (emails = []) =>
+  api.get("/usuarios/lista-basica", { params: { emails: emails.join(",") } }).then((r) => r.data.data);
+
 // ─── ESTATÍSTICAS ─────────────────────────────────────────
 export const carregarEstatisticas = () =>
   api.get("/estatisticas").then((r) => r.data.data);
@@ -72,6 +77,9 @@ export const listarProdutos = () =>
 export const criarProduto = (dados) =>
   api.post("/produtos", dados).then((r) => r.data.data);
 
+export const editarProduto = (id, dados) =>
+  api.put(`/produtos/${id}`, dados).then((r) => r.data.data);
+
 export const deletarProduto = (id, usuario_email) =>
   api.delete(`/produtos/${id}`, { data: { usuario_email } }).then((r) => r.data.success);
 
@@ -82,4 +90,19 @@ export const setProdutosUsuario = (email, produto_ids, usuario_email) =>
   api.put(`/produtos/usuario/${encodeURIComponent(email)}`, { produto_ids, usuario_email })
     .then((r) => r.data.success);
 
-export async function listarProcedimentos(produto_id = '') { const r = await api.get('/procedimentos', { params: produto_id ? { produto_id } : {} }); return r.data.data; } export async function criarProcedimento(dados) { const r = await api.post('/procedimentos', dados); return r.data.data; } export async function excluirProcedimento(id, usuario_email) { await api.delete(`/procedimentos/${id}`, { data: { usuario_email } }); }
+// ─── PROCEDIMENTOS ────────────────────────────────────────
+export const listarProcedimentos = (produto_id = "") =>
+  api.get("/procedimentos", { params: produto_id ? { produto_id } : {} }).then((r) => r.data.data);
+
+export const criarProcedimento = (dados) =>
+  api.post("/procedimentos", dados).then((r) => r.data.data);
+
+export const excluirProcedimento = (id, usuario_email) =>
+  api.delete(`/procedimentos/${id}`, { data: { usuario_email } }).then((r) => r.data.success);
+
+// ─── LOGS ─────────────────────────────────────────────────
+export const listarLogs = (params = {}) =>
+  api.get("/logs", { params }).then((r) => r.data.data);
+
+export const limparLogs = (usuario_email) =>
+  api.delete("/logs", { data: { usuario_email } }).then((r) => r.data.success);

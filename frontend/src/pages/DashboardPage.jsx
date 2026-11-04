@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useAuth } from "../context/AuthContext";
 import { useTheme } from "../context/ThemeContext";
-import { listarErros, carregarEstatisticas, listarProdutos } from "../services/api";
+import { listarErros, carregarEstatisticas, listarProdutos, getProdutosUsuario } from "../services/api";
 import Header from "../components/Header";
 import ErroCard from "../components/ErroCard";
 import NovoErroModal from "../components/NovoErroModal";
@@ -17,8 +17,10 @@ import ToggleTema from "../components/ToggleTema";
 import PerfilSidebar from "../components/PerfilSidebar";
 import MigrarProdutosPage from "./MigrarProdutosPage";
 import ProcedimentosPage from "./ProcedimentosPage";
-import { FaRegFolderOpen } from "react-icons/fa";
-import { IoArrowBack, IoSearch, IoRefreshOutline } from "react-icons/io5";
+import ArvoreGrupos from "../components/ArvoreGrupos";
+import CaminhoGrupo from "../components/CaminhoGrupo";
+import { construirArvore, caminho, visiveis, NOME_BASE } from "../utils/grupos";
+import { IoArrowBack, IoSearch, IoRefreshOutline, IoClose } from "react-icons/io5";
 
 // ── Sub-header para sub-páginas ───────────────────────────────────────────
 function SubPageHeader({ titulo, onVoltar, direita }) {
@@ -58,6 +60,7 @@ export default function DashboardPage() {
   const [viewLogs, setViewLogs] = useState(false);
   const [viewGestao, setViewGestao] = useState(false);
   const [produtos, setProdutos] = useState([]);
+  const [meusGrupos, setMeusGrupos] = useState([]);
   const [produtoFiltro, setProdutoFiltro] = useState("");
   const [viewMigrar, setViewMigrar] = useState(false);
   const [carregandoErros, setCarregandoErros] = useState(true);
@@ -91,7 +94,13 @@ export default function DashboardPage() {
 
   useEffect(() => {
     listarProdutos().then(setProdutos).catch(() => {});
-  }, []);
+    if (user?.email) getProdutosUsuario(user.email).then(setMeusGrupos).catch(() => {});
+  }, [user?.email]);
+
+  // Base de erros: árvore completa (para os caminhos) e a parte que o usuário enxerga (filtro lateral)
+  const { mapa: mapaTodos } = useMemo(() => construirArvore(produtos), [produtos]);
+  const listaVisivel = useMemo(() => visiveis(produtos, meusGrupos, user?.isAdmin), [produtos, meusGrupos, user?.isAdmin]);
+  const { raizes: raizesFiltro, mapa: mapaFiltro } = useMemo(() => construirArvore(listaVisivel), [listaVisivel]);
 
   // Presence via Supabase Realtime
   useEffect(() => {
@@ -128,7 +137,7 @@ export default function DashboardPage() {
 
   if (viewGestao) return (
     <div className="app-shell">
-      <SubPageHeader titulo="Gestão de Produtos" onVoltar={() => setViewGestao(false)} direita={<SeletorTema />} />
+      <SubPageHeader titulo={NOME_BASE} onVoltar={() => setViewGestao(false)} direita={<SeletorTema />} />
       <GestaoUsuariosPage onVoltar={() => setViewGestao(false)} />
     </div>
   );
@@ -196,7 +205,15 @@ export default function DashboardPage() {
 
         {/* Sidebar esquerda: perfil */}
         <div className="app-aside-left" style={{ display: "flex", flexDirection: "column", gap: 12, flexShrink: 0, width: 236 }}>
-          <PerfilSidebar onEditarPerfil={() => setViewPerfil(true)} />
+          <PerfilSidebar onEditarPerfil={() => setViewPerfil(true)}>
+            <ArvoreGrupos
+              raizes={raizesFiltro}
+              mapa={mapaFiltro}
+              selecionado={produtoFiltro}
+              onSelecionar={setProdutoFiltro}
+              totalGeral={user?.isAdmin ? stats?.totalErros : undefined}
+            />
+          </PerfilSidebar>
         </div>
 
         {/* Coluna central */}
@@ -219,30 +236,14 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* Filtro por produto */}
-          {produtos.length > 0 && (
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-              <button
-                onClick={() => setProdutoFiltro("")}
-                className={`chip ${!produtoFiltro ? "chip-active" : ""}`}
-                style={{ background: !produtoFiltro ? tema.statBg1 : undefined, color: !produtoFiltro ? tema.statCor1 : undefined }}
-                title="Todos os produtos"
-              >
-                <FaRegFolderOpen /> Todos
+          {/* Filtro ativo da Base de erros */}
+          {produtoFiltro && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Filtrando por:</span>
+              <CaminhoGrupo nos={caminho(produtoFiltro, mapaTodos)} />
+              <button onClick={() => setProdutoFiltro("")} className="btn btn-ghost btn-sm" title="Remover filtro">
+                <IoClose size={14} /> Limpar
               </button>
-              {produtos.map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => setProdutoFiltro(produtoFiltro === p.id ? "" : p.id)}
-                  className={`chip ${produtoFiltro === p.id ? "chip-active" : ""}`}
-                  style={{
-                    background: produtoFiltro === p.id ? p.cor : undefined,
-                    color: produtoFiltro === p.id ? "white" : undefined,
-                  }}
-                >
-                  {p.nome}
-                </button>
-              ))}
             </div>
           )}
 
@@ -311,6 +312,7 @@ export default function DashboardPage() {
                   key={erro.id}
                   erro={erro}
                   user={user}
+                  mapaGrupos={mapaTodos}
                   onAtualizar={carregar}
                   onVerDetalhes={(id) => setViewErroId(id)}
                 />

@@ -5,7 +5,7 @@ import { IoPencil } from "react-icons/io5";
 import { useState, useEffect } from "react";
 import api from "../services/api";
 
-export default function PerfilSidebar({ onEditarPerfil }) {
+export default function PerfilSidebar({ onEditarPerfil, children }) {
   const { user } = useAuth();
   const { temaNome } = useTheme();
   const [produtos, setProdutos] = useState([]);
@@ -63,9 +63,9 @@ export default function PerfilSidebar({ onEditarPerfil }) {
         </div>
       </div>
 
-      {produtos.length > 0 && (
+      {!user?.isAdmin && produtos.length > 0 && (
         <div className="card" style={{ padding: "14px 16px" }}>
-          <p style={{ margin: "0 0 10px", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.8 }}>Meus produtos</p>
+          <p style={{ margin: "0 0 10px", fontSize: 11, fontWeight: 700, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: 0.8 }}>Meus grupos</p>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {produtos.map(p => (
               <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 8, background: "var(--surface-alt)", border: "1px solid var(--border)" }}>
@@ -76,6 +76,8 @@ export default function PerfilSidebar({ onEditarPerfil }) {
           </div>
         </div>
       )}
+
+      {children}
     </aside>
   );
 }

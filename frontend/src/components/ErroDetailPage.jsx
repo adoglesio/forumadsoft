@@ -2,13 +2,15 @@ import { useState, useEffect, useRef } from "react";
 import api, {
   buscarErro, editarErro, excluirErro,
   adicionarComentario, editarComentario, excluirComentario,
-  listarProdutos, getProdutosUsuario,
+  listarProdutos,
 } from "../services/api";
 
 import { useAuth } from "../context/AuthContext";
 import Reacoes from "./Reacoes";
 import PainelEmoji from "./PainelEmoji";
-import LogoProduto from "./LogoProduto";
+import CaminhoGrupo from "./CaminhoGrupo";
+import SeletorGrupo from "./SeletorGrupo";
+import { construirArvore, caminho, NOME_BASE } from "../utils/grupos";
 import { IoPencil, IoTrashOutline, IoSend, IoChatbubbles, IoCheckmarkCircle, IoCamera, IoClose } from "react-icons/io5";
 import { MdOutlineDescription } from "react-icons/md";
 
@@ -46,8 +48,10 @@ export default function ErroDetailPage({ erroId, onVoltar, onAtualizar }) {
   const [erro, setErro] = useState(null);
   const [loading, setLoading] = useState(true);
   const [modoEdicao, setModoEdicao] = useState(false);
+  const [grupos, setGrupos] = useState([]);
 
   useEffect(() => { carregar(); }, [erroId]);
+  useEffect(() => { listarProdutos().then(setGrupos).catch(() => {}); }, []);
 
   async function carregar() {
     setLoading(true);
@@ -79,9 +83,13 @@ export default function ErroDetailPage({ erroId, onVoltar, onAtualizar }) {
 
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16, gap: 12 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            {erro.produto_nome && (
+            {erro.produto_id && (
               <div style={{ marginBottom: 8 }}>
-                <LogoProduto icone={erro.produto_icone} nome={erro.produto_nome} cor={erro.produto_cor} size="sm" />
+                <CaminhoGrupo
+                  nos={caminho(erro.produto_id, construirArvore(grupos).mapa)}
+                  nomeFallback={erro.produto_nome}
+                  corFallback={erro.produto_cor}
+                />
               </div>
             )}
             <h2 style={{ margin: 0, color: "var(--text)", fontSize: 20, fontWeight: 700, lineHeight: 1.3 }}>{erro.titulo}</h2>
@@ -250,23 +258,17 @@ function EditarErroForm({ erro, user, onCancelado, onSalvo }) {
   const [msg, setMsg] = useState("");
   const [msgTipo, setMsgTipo] = useState("erro");
   const [produtos, setProdutos] = useState([]);
-  const [produtoId, setProdutoId] = useState(erro.produto_id || "");
+  const [produtoId, setProdutoId] = useState(erro.produto_id == null ? "" : String(erro.produto_id));
   const fileRef = useRef();
 
   useEffect(() => {
-    async function carregarProdutos() {
-      try {
-        const todos = await listarProdutos();
-        const meus = await getProdutosUsuario(user.email);
-        setProdutos(user.isAdmin ? todos : todos.filter(p => meus.includes(p.id)));
-      } catch {}
-    }
-    carregarProdutos();
+    // só administrador escolhe o grupo da Base de erros
+    if (user?.isAdmin) listarProdutos().then(setProdutos).catch(() => {});
   }, [user]);
 
   async function salvar() {
     if (!titulo.trim() || !descricao.trim()) { setMsg("Preencha os campos obrigatórios."); setMsgTipo("erro"); return; }
-    const ok = await editarErro(erro.id, { titulo, descricao, solucao, imagem, produto_id: produtoId || null, usuario_email: user.email });
+    const ok = await editarErro(erro.id, { titulo, descricao, solucao, imagem, usuario_email: user.email, ...(user.isAdmin ? { produto_id: produtoId || null } : {}) });
     if (ok) { setMsg("Salvo!"); setMsgTipo("sucesso"); setTimeout(onSalvo, 800); }
     else { setMsg("Não foi possível salvar."); setMsgTipo("erro"); }
   }
@@ -276,28 +278,10 @@ function EditarErroForm({ erro, user, onCancelado, onSalvo }) {
       <div className="card" style={{ padding: 28 }}>
         <h2 style={{ marginBottom: 20, color: "var(--text)", fontSize: 19, display: "flex", alignItems: "center", gap: 8 }}><IoPencil size={18} /> Editar erro</h2>
 
-        {produtos.length > 0 && (
+        {user?.isAdmin && produtos.length > 0 && (
           <div className="field">
-            <label className="field-label">Produto</label>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button
-                onClick={() => setProdutoId("")}
-                className={`chip ${!produtoId ? "chip-active" : ""}`}
-                style={{ background: !produtoId ? "var(--primary-soft)" : undefined, color: !produtoId ? "var(--primary)" : undefined }}
-              >
-                Nenhum
-              </button>
-              {produtos.map(p => (
-                <button
-                  key={p.id}
-                  onClick={() => setProdutoId(produtoId === p.id ? "" : p.id)}
-                  className={`chip ${produtoId === p.id ? "chip-active" : ""}`}
-                  style={{ background: produtoId === p.id ? p.cor : undefined, color: produtoId === p.id ? "white" : undefined, borderRadius: 8 }}
-                >
-                  <LogoProduto icone={p.icone} nome={p.nome} cor={p.cor} size="sm" style={{ height: 14, maxWidth: 60, filter: produtoId === p.id ? "brightness(10)" : "none" }} />
-                </button>
-              ))}
-            </div>
+            <label className="field-label">{NOME_BASE}</label>
+            <SeletorGrupo produtos={produtos} value={produtoId} onChange={setProdutoId} />
           </div>
         )}
 

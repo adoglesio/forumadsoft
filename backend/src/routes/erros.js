@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { query, queryOne } = require('../db/database');
 const { registrarLog } = require('./logs');
+const { subarvore } = require('../db/grupos');
 
 function getIP(req) {
   return req.headers['x-forwarded-for']?.split(',')[0] || req.socket?.remoteAddress || null;
@@ -23,17 +24,23 @@ router.get('/', async (req, res) => {
     if (usuario_email) {
       const u = await queryOne('SELECT * FROM usuarios WHERE email = $1', [usuario_email]);
       if (u && !u.is_admin) {
-        const ids = (await query('SELECT produto_id FROM usuario_produtos WHERE usuario_email = $1', [usuario_email])).map(r => r.produto_id);
-        if (ids.length > 0) {
-          params.push(ids);
-          where.push(`(e.produto_id = ANY($${params.length}) OR e.produto_id IS NULL)`);
+        const atribuidos = (await query('SELECT produto_id FROM usuario_produtos WHERE usuario_email = $1', [usuario_email])).map(r => r.produto_id);
+        if (atribuidos.length > 0) {
+          // grupo atribuído + todos os subgrupos dele
+          const liberados = await subarvore(atribuidos);
+          params.push(liberados);
+          where.push(`(e.produto_id = ANY($${params.length}::bigint[]) OR e.produto_id IS NULL)`);
         } else {
           where.push('e.produto_id IS NULL');
         }
       }
     }
 
-    if (produto_id) { params.push(parseInt(produto_id)); where.push(`e.produto_id = $${params.length}`); }
+    if (produto_id) {
+      // filtrar por um grupo traz também os erros de todos os subgrupos dele
+      params.push(await subarvore([produto_id]));
+      where.push(`e.produto_id = ANY($${params.length}::bigint[])`);
+    }
     if (filtro) {
       params.push(`%${filtro}%`);
       where.push(`(e.titulo ILIKE $${params.length} OR e.descricao ILIKE $${params.length})`);
@@ -62,10 +69,13 @@ router.post('/', async (req, res) => {
   try {
     const { titulo, descricao, solucao, criador_email, criador_nome, imagem, produto_id } = req.body;
     if (!titulo || !descricao) return res.status(400).json({ success: false, error: 'Título e descrição são obrigatórios' });
+    // só administrador vincula o erro a um grupo da Base de erros
+    const solicitante = criador_email ? await queryOne('SELECT is_admin FROM usuarios WHERE email = $1', [criador_email]) : null;
+    const grupoFinal = solicitante?.is_admin ? (produto_id || null) : null;
     const novo = await queryOne(
       `INSERT INTO erros (titulo, descricao, solucao, criador_email, criador_nome, imagem, produto_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [titulo, descricao, solucao || '', criador_email || 'anonimo', criador_nome || 'Anônimo', imagem || null, produto_id || null]
+      [titulo, descricao, solucao || '', criador_email || 'anonimo', criador_nome || 'Anônimo', imagem || null, grupoFinal]
     );
     registrarLog('erro', 'erro_criado', criador_nome, criador_email, `${criador_nome} reportou o erro: "${titulo}"`, getIP(req));
     res.json({ success: true, data: { ...novo, comentarios: [] } });
@@ -80,7 +90,8 @@ router.put('/:id', async (req, res) => {
     const u = await queryOne('SELECT * FROM usuarios WHERE email = $1', [usuario_email]);
     if (!u?.is_admin && erro.criador_email !== usuario_email) return res.status(403).json({ success: false, error: 'Sem permissão' });
 
-    const novoProdutoId = produto_id !== undefined ? (produto_id ? parseInt(produto_id) : null) : erro.produto_id;
+    // só administrador troca o grupo; para os demais o vínculo atual é mantido
+    const novoProdutoId = (u?.is_admin && produto_id !== undefined) ? (produto_id ? parseInt(produto_id) : null) : erro.produto_id;
 
     await query(
       `UPDATE erros SET titulo = COALESCE($1, titulo), descricao = COALESCE($2, descricao),

@@ -17,13 +17,19 @@ create table if not exists usuarios (
   criado_em  timestamptz default now()
 );
 
+-- Base de erros: cada linha é um grupo; parent_id aponta para o grupo pai
+-- (null = grupo principal). Nome é único dentro do mesmo pai.
 create table if not exists produtos (
   id         bigint generated always as identity primary key,
-  nome       text unique not null,
+  nome       text not null,
   cor        text default '#0A5C8E',
   icone      text default 'SIAFW',
-  created_at timestamptz default now()
+  parent_id  bigint references produtos(id) on delete cascade,
+  created_at timestamptz default now(),
+  constraint ck_produtos_nao_pai_de_si check (parent_id is null or parent_id <> id)
 );
+create unique index if not exists uq_produtos_pai_nome on produtos (coalesce(parent_id, 0), lower(nome));
+create index if not exists idx_produtos_parent on produtos (parent_id);
 
 create table if not exists usuario_produtos (
   id            bigint generated always as identity primary key,
@@ -97,20 +103,26 @@ alter publication supabase_realtime add table erros;
 alter publication supabase_realtime add table comentarios;
 
 -- ── Produtos padrão ─────────────────────────────────────────────────────
-insert into produtos (nome, cor, icone) values
+insert into produtos (nome, cor, icone)
+select v.nome, v.cor, v.icone
+from (values
   ('SIAFW', '#0A5C8E', 'SIAFW'),
   ('SIAF Evolution', '#1a7ab8', 'siafEvolution'),
   ('GOL', '#0d1f3c', 'GOL'),
   ('AdChef', '#4f46e5', 'adchef')
-on conflict (nome) do nothing;
+) as v(nome, cor, icone)
+where not exists (select 1 from produtos p where p.parent_id is null and lower(p.nome) = lower(v.nome));
 
 -- ── Produtos padrão ─────────────────────────────────────────────────────
-insert into produtos (nome, cor, icone) values
+insert into produtos (nome, cor, icone)
+select v.nome, v.cor, v.icone
+from (values
   ('SIAFW', '#0A5C8E', 'SIAFW'),
   ('SIAF Evolution', '#1a7ab8', 'siafEvolution'),
   ('GOL', '#0d1f3c', 'GOL'),
   ('AdChef', '#4f46e5', 'adchef')
-on conflict (nome) do nothing;
+) as v(nome, cor, icone)
+where not exists (select 1 from produtos p where p.parent_id is null and lower(p.nome) = lower(v.nome));
 
 -- ── Usuário admin padrão (mesmo hash usado no app: sha256(salt+senha)) ────
 -- Senha inicial: 4071 — troque depois de migrar.

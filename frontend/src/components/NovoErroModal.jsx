@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
-import { criarErro, listarProdutos, getProdutosUsuario } from "../services/api";
-import LogoProduto from "./LogoProduto";
+import { criarErro, listarProdutos } from "../services/api";
+import SeletorGrupo from "./SeletorGrupo";
+import { NOME_BASE } from "../utils/grupos";
 import { MdReportGmailerrorred } from "react-icons/md";
 import { IoClose } from "react-icons/io5";
 
@@ -17,23 +18,15 @@ export default function NovoErroModal({ onClose, onCriado }) {
   const [salvando, setSalvando] = useState(false);
 
   useEffect(() => {
-    async function carregarProdutos() {
-      try {
-        const todos = await listarProdutos();
-        const meus = await getProdutosUsuario(user.email);
-        const filtrados = user.isAdmin ? todos : todos.filter(p => meus.includes(p.id));
-        setProdutos(filtrados);
-        if (filtrados.length === 1) setProdutoId(filtrados[0].id);
-      } catch {}
-    }
-    carregarProdutos();
+    // só administrador escolhe o grupo da Base de erros
+    if (user?.isAdmin) listarProdutos().then(setProdutos).catch(() => {});
   }, [user]);
 
   async function handleSubmit() {
     if (!titulo.trim() || !descricao.trim()) { setErro("Título e descrição são obrigatórios."); return; }
     setSalvando(true);
     try {
-      await criarErro({ titulo, descricao, solucao, imagem, produto_id: produtoId || null, criador_email: user.email, criador_nome: user.nome });
+      await criarErro({ titulo, descricao, solucao, imagem, produto_id: user.isAdmin ? (produtoId || null) : null, criador_email: user.email, criador_nome: user.nome });
       onCriado();
       onClose();
     } catch (e) { setErro(e.message); }
@@ -56,22 +49,16 @@ export default function NovoErroModal({ onClose, onCriado }) {
           <button onClick={onClose} className="btn-icon btn-ghost" style={{ border: "none" }} aria-label="Fechar"><IoClose size={20} /></button>
         </div>
 
-        {produtos.length > 0 && (
+        {user?.isAdmin && produtos.length > 0 && (
           <div className="field">
-            <label className="field-label">Produto</label>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {produtos.map(p => (
-                <button
-                  key={p.id}
-                  onClick={() => setProdutoId(produtoId === p.id ? "" : p.id)}
-                  className={`chip ${produtoId === p.id ? "chip-active" : ""}`}
-                  style={{ background: produtoId === p.id ? p.cor : undefined, color: produtoId === p.id ? "white" : undefined }}
-                >
-                  <LogoProduto icone={p.icone} nome={p.nome} cor={p.cor} size="sm" style={{ height: 14, maxWidth: 70, filter: produtoId === p.id ? "brightness(10)" : "none" }} />
-                </button>
-              ))}
-            </div>
+            <label className="field-label">{NOME_BASE}</label>
+            <SeletorGrupo produtos={produtos} value={produtoId} onChange={setProdutoId} />
           </div>
+        )}
+        {!user?.isAdmin && (
+          <p style={{ margin: "-8px 0 16px", fontSize: 12, color: "var(--text-muted)" }}>
+            Um administrador vai classificar este erro na {NOME_BASE}.
+          </p>
         )}
 
         <div className="field">

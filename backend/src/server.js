@@ -1,4 +1,6 @@
-require('dotenv').config();
+// Em desenvolvimento lê o arquivo .env; na Vercel as variáveis vêm do painel,
+// então a ausência do pacote dotenv não pode derrubar o servidor.
+try { require('dotenv').config(); } catch { /* ok */ }
 
 const express = require('express');
 const cors    = require('cors');
@@ -43,9 +45,10 @@ function safeRoute(routePath) {
     return require(routePath);
   } catch (err) {
     console.error(`Erro ao carregar rota ${routePath}:`, err.message);
+    // r.use (e não r.all('*')) funciona no Express 4 e no 5; no 5 o '*' derrubava o servidor
     const r = express.Router();
-    r.all('*', (_req, res) =>
-      res.status(500).json({ error: `Rota falhou ao carregar: ${err.message}` })
+    r.use((_req, res) =>
+      res.status(500).json({ error: `Rota ${routePath} falhou ao carregar: ${err.message}` })
     );
     return r;
   }
@@ -57,6 +60,7 @@ app.use('/api/procedimentos', safeRoute('./routes/procedimentos'));
 app.use('/api/logs',          safeRoute('./routes/logs'));
 app.use('/api/reacoes',       safeRoute('./routes/reacoes'));
 app.use('/api/produtos',      safeRoute('./routes/produtos'));
+app.use('/api/admin/usuarios', safeRoute('./routes/usuariosAdmin'));
 
 // ── Estatísticas ──────────────────────────────────────────────────────────
 app.get('/api/estatisticas', async (req, res) => {
@@ -73,6 +77,13 @@ app.get('/api/estatisticas', async (req, res) => {
 
 // ── 404 ───────────────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Rota não encontrada' }));
+
+// ── Erros: sempre responde em JSON (origem bloqueada = 403, não 500) ───────
+app.use((err, _req, res, _next) => {
+  if (String(err?.message).startsWith('CORS')) return res.status(403).json({ error: err.message });
+  console.error('Erro não tratado:', err);
+  res.status(500).json({ error: err?.message || 'Erro interno' });
+});
 
 // ── Start (só dev local) ──────────────────────────────────────────────────
 if (require.main === module) {

@@ -1,64 +1,127 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../context/AuthContext";
-import { useTheme } from "../context/ThemeContext";
-import api, { listarProdutos, getProdutosUsuario, setProdutosUsuario, criarProduto, deletarProduto } from "../services/api";
-import LogoProduto from "../components/LogoProduto";
-import { IoTrashOutline, IoCubeOutline, IoPeopleOutline, IoLockClosedOutline, IoSaveOutline } from "react-icons/io5";
+import api, { listarProdutos, getProdutosUsuario, setProdutosUsuario, criarProduto, editarProduto, deletarProduto } from "../services/api";
+import { construirArvore, opcoesPlanas, NOME_BASE } from "../utils/grupos";
+import {
+  IoTrashOutline, IoLayersOutline, IoPeopleOutline, IoLockClosedOutline, IoSaveOutline,
+  IoAdd, IoPencil, IoCheckmark, IoClose, IoChevronForward, IoChevronDown,
+} from "react-icons/io5";
 
 export default function GestaoUsuariosPage({ onVoltar }) {
   const { user } = useAuth();
   const [usuarios, setUsuarios] = useState([]);
   const [produtos, setProdutos] = useState([]);
   const [selecionado, setSelecionado] = useState(null);
-  const [produtosUsuario, setProdutosUsuarioState] = useState([]);
-  const [novoProduto, setNovoProduto] = useState("");
-  const [corNovo, setCorNovo] = useState("#0A5C8E");
-  const [iconeNovo, setIconeNovo] = useState("📦");
+  const [gruposUsuario, setGruposUsuario] = useState([]);
   const [salvando, setSalvando] = useState(false);
   const [msg, setMsg] = useState("");
+  const [erroMsg, setErroMsg] = useState("");
+
+  // formulário de grupo principal
+  const [novoNome, setNovoNome] = useState("");
+  const [novaCor, setNovaCor] = useState("#0A5C8E");
+
+  // edição na árvore
+  const [adicionandoEm, setAdicionandoEm] = useState(null); // id do grupo pai
+  const [subNome, setSubNome] = useState("");
+  const [editandoId, setEditandoId] = useState(null);
+  const [editNome, setEditNome] = useState("");
+  const [recolhidos, setRecolhidos] = useState(() => new Set());
+
+  const { raizes } = useMemo(() => construirArvore(produtos), [produtos]);
+  const planas = useMemo(() => opcoesPlanas(raizes), [raizes]);
 
   useEffect(() => { carregar(); }, []);
 
   async function carregar() {
     const [u, p] = await Promise.all([
-      api.get("/usuarios/listar").then(r => r.data.data).catch(() => []),
-      listarProdutos(),
+      api.get("/usuarios/listar").then((r) => r.data.data).catch(() => []),
+      listarProdutos().catch(() => []),
     ]);
     setUsuarios(u);
     setProdutos(p);
   }
 
+  function avisar(texto, erro = false) {
+    if (erro) { setErroMsg(texto); setTimeout(() => setErroMsg(""), 5000); }
+    else { setMsg(texto); setTimeout(() => setMsg(""), 2500); }
+  }
+
+  async function executar(fn, sucesso) {
+    try {
+      await fn();
+      if (sucesso) avisar(sucesso);
+      await carregar();
+      return true;
+    } catch (e) {
+      avisar(e.message, true);
+      return false;
+    }
+  }
+
+  // ── grupos ──────────────────────────────────────────────────────────────
+  async function criarPrincipal() {
+    if (!novoNome.trim()) return;
+    const ok = await executar(
+      () => criarProduto({ nome: novoNome.trim(), cor: novaCor, usuario_email: user.email }),
+      "Grupo criado!"
+    );
+    if (ok) setNovoNome("");
+  }
+
+  async function criarSub(paiId) {
+    if (!subNome.trim()) return;
+    const ok = await executar(
+      () => criarProduto({ nome: subNome.trim(), parent_id: paiId, usuario_email: user.email }),
+      "Subgrupo criado!"
+    );
+    if (ok) {
+      setSubNome("");
+      setAdicionandoEm(null);
+      setRecolhidos((prev) => { const n = new Set(prev); n.delete(paiId); return n; });
+    }
+  }
+
+  async function renomear(id) {
+    if (!editNome.trim()) return;
+    const ok = await executar(() => editarProduto(id, { nome: editNome.trim(), usuario_email: user.email }), "Nome atualizado!");
+    if (ok) setEditandoId(null);
+  }
+
+  function contarDescendentes(no) {
+    return no.filhos.reduce((acc, f) => acc + 1 + contarDescendentes(f), 0);
+  }
+
+  async function excluir(no) {
+    const extra = no.filhos.length ? ` Os ${contarDescendentes(no)} subgrupo(s) dentro dele também serão excluídos.` : "";
+    if (!window.confirm(`Excluir "${no.nome}"?${extra}`)) return;
+    await executar(() => deletarProduto(no.id, user.email), "Grupo excluído.");
+  }
+
+  function alternarRecolhido(id) {
+    setRecolhidos((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }
+
+  // ── permissões de usuário ───────────────────────────────────────────────
   async function selecionarUsuario(u) {
     setSelecionado(u);
     const ids = await getProdutosUsuario(u.email);
-    setProdutosUsuarioState(ids);
+    setGruposUsuario(ids.map(String));
   }
 
-  function toggleProduto(id) {
-    setProdutosUsuarioState(prev =>
-      prev.includes(id) ? prev.filter(p => p !== id) : [...prev, id]
-    );
+  function alternarGrupoUsuario(id) {
+    setGruposUsuario((prev) => (prev.includes(id) ? prev.filter((p) => p !== id) : [...prev, id]));
   }
 
-  async function salvarProdutos() {
+  async function salvarGrupos() {
     setSalvando(true);
-    await setProdutosUsuario(selecionado.email, produtosUsuario, user.email);
-    setMsg("Produtos salvos!");
-    setTimeout(() => setMsg(""), 2500);
+    try {
+      await setProdutosUsuario(selecionado.email, gruposUsuario, user.email);
+      avisar("Grupos salvos!");
+    } catch (e) {
+      avisar(e.message, true);
+    }
     setSalvando(false);
-  }
-
-  async function handleCriarProduto() {
-    if (!novoProduto.trim()) return;
-    await criarProduto({ nome: novoProduto.trim(), cor: corNovo, icone: iconeNovo, usuario_email: user.email });
-    setNovoProduto("");
-    carregar();
-  }
-
-  async function handleDeletarProduto(id) {
-    if (!confirm("Deletar este produto?")) return;
-    await deletarProduto(id, user.email);
-    carregar();
   }
 
   if (!user?.isAdmin) return (
@@ -69,38 +132,119 @@ export default function GestaoUsuariosPage({ onVoltar }) {
     </div>
   );
 
+  function linha(no, nivel) {
+    const recolhido = recolhidos.has(no.id);
+    const temFilhos = no.filhos.length > 0;
+    const editando = editandoId === no.id;
+    return (
+      <div key={no.id}>
+        <div
+          style={{
+            display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", paddingLeft: 8 + nivel * 18,
+            borderRadius: "var(--radius-sm)", border: "1px solid var(--input-border)", background: "var(--input-bg)", marginBottom: 4,
+          }}
+        >
+          <span
+            onClick={() => temFilhos && alternarRecolhido(no.id)}
+            style={{ width: 16, display: "inline-flex", justifyContent: "center", color: "var(--text-muted)", cursor: temFilhos ? "pointer" : "default", flexShrink: 0 }}
+          >
+            {temFilhos && (recolhido ? <IoChevronForward size={13} /> : <IoChevronDown size={13} />)}
+          </span>
+          <span style={{ width: 9, height: 9, borderRadius: "50%", background: no.cor, flexShrink: 0 }} />
+
+          {editando ? (
+            <input
+              autoFocus
+              value={editNome}
+              onChange={(e) => setEditNome(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") renomear(no.id); if (e.key === "Escape") setEditandoId(null); }}
+              className="input"
+              style={{ flex: 1, padding: "4px 8px", fontSize: 13 }}
+            />
+          ) : (
+            <span style={{ flex: 1, minWidth: 0, fontSize: 13, fontWeight: nivel === 0 ? 700 : 500, color: "var(--text)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {no.nome}
+              {no.total_erros > 0 && <span style={{ marginLeft: 8, fontSize: 11, color: "var(--text-muted)", fontWeight: 400 }}>{no.total_erros} erro{no.total_erros > 1 ? "s" : ""}</span>}
+            </span>
+          )}
+
+          {editando ? (
+            <>
+              <button onClick={() => renomear(no.id)} className="btn-icon btn-ghost" style={{ border: "none", color: "var(--success)" }} title="Salvar"><IoCheckmark size={16} /></button>
+              <button onClick={() => setEditandoId(null)} className="btn-icon btn-ghost" style={{ border: "none" }} title="Cancelar"><IoClose size={16} /></button>
+            </>
+          ) : (
+            <>
+              <button onClick={() => { setAdicionandoEm(no.id); setSubNome(""); }} className="btn-icon btn-ghost" style={{ border: "none", color: "var(--primary)" }} title="Adicionar subgrupo"><IoAdd size={17} /></button>
+              <button onClick={() => { setEditandoId(no.id); setEditNome(no.nome); }} className="btn-icon btn-ghost" style={{ border: "none" }} title="Renomear"><IoPencil size={14} /></button>
+              <button onClick={() => excluir(no)} className="btn-icon btn-ghost" style={{ border: "none", color: "var(--danger)" }} title="Excluir"><IoTrashOutline size={15} /></button>
+            </>
+          )}
+        </div>
+
+        {adicionandoEm === no.id && (
+          <div style={{ display: "flex", gap: 6, marginBottom: 4, paddingLeft: 8 + (nivel + 1) * 18 }}>
+            <input
+              autoFocus
+              value={subNome}
+              onChange={(e) => setSubNome(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") criarSub(no.id); if (e.key === "Escape") setAdicionandoEm(null); }}
+              placeholder={`Subgrupo dentro de "${no.nome}"`}
+              className="input"
+              style={{ flex: 1, padding: "6px 10px", fontSize: 13 }}
+            />
+            <button onClick={() => criarSub(no.id)} className="btn btn-primary btn-sm">Adicionar</button>
+            <button onClick={() => setAdicionandoEm(null)} className="btn btn-secondary btn-sm">Cancelar</button>
+          </div>
+        )}
+
+        {temFilhos && !recolhido && no.filhos.map((f) => linha(f, nivel + 1))}
+      </div>
+    );
+  }
+
   return (
-    <div className="app-narrow" style={{ maxWidth: 900 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
+    <div className="app-narrow" style={{ maxWidth: 960 }}>
+      <div style={{ marginBottom: 24 }}>
         <h2 style={{ margin: 0, color: "var(--text)", fontSize: 20, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
-          <IoCubeOutline size={20} /> Gestão de produtos e usuários
+          <IoLayersOutline size={20} /> {NOME_BASE}
         </h2>
+        <p style={{ margin: "4px 0 0", fontSize: 13, color: "var(--text-muted)" }}>
+          Monte os grupos e subgrupos. Só administradores cadastram grupos e vinculam erros a eles.
+        </p>
       </div>
 
+      {(msg || erroMsg) && (
+        <div className={`form-message ${erroMsg ? "form-message-error" : "form-message-success"}`} style={{ marginBottom: 14 }}>
+          {erroMsg || msg}
+        </div>
+      )}
+
       <div className="grid-2">
-
         <div className="card" style={{ padding: 20 }}>
-          <h3 style={{ margin: "0 0 16px", color: "var(--text)", fontSize: 15, fontWeight: 700 }}>Produtos</h3>
+          <h3 style={{ margin: "0 0 4px", color: "var(--text)", fontSize: 15, fontWeight: 700 }}>Grupos e subgrupos</h3>
+          <p style={{ margin: "0 0 14px", fontSize: 12, color: "var(--text-muted)" }}>
+            Use <IoAdd size={12} style={{ verticalAlign: "middle" }} /> para criar um subgrupo dentro do grupo.
+          </p>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
-            {produtos.map(p => (
-              <div key={p.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--input-border)", background: "var(--input-bg)" }}>
-                <LogoProduto icone={p.icone} nome={p.nome} cor={p.cor} size="md" />
-                <button onClick={() => handleDeletarProduto(p.id)} className="btn-icon btn-ghost" style={{ border: "none", color: "var(--danger)" }} title="Excluir produto"><IoTrashOutline size={16} /></button>
-              </div>
-            ))}
-            {produtos.length === 0 && <p style={{ color: "var(--text-muted)", fontSize: 13 }}>Nenhum produto cadastrado.</p>}
+          <div style={{ marginBottom: 16 }}>
+            {raizes.map((r) => linha(r, 0))}
+            {raizes.length === 0 && <p style={{ color: "var(--text-muted)", fontSize: 13 }}>Nenhum grupo cadastrado.</p>}
           </div>
 
           <div style={{ borderTop: "1px solid var(--border)", paddingTop: 14 }}>
-            <p style={{ margin: "0 0 8px", fontWeight: 600, fontSize: 13, color: "var(--text)" }}>Novo produto</p>
-            <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-              <input value={novoProduto} onChange={e => setNovoProduto(e.target.value)} placeholder="Nome do produto" className="input" style={{ flex: 1 }} />
-              <input type="color" value={corNovo} onChange={e => setCorNovo(e.target.value)} style={{ width: 38, height: 38, border: "none", borderRadius: 8, cursor: "pointer", padding: 2, flexShrink: 0 }} title="Cor" />
-            </div>
+            <p style={{ margin: "0 0 8px", fontWeight: 600, fontSize: 13, color: "var(--text)" }}>Novo grupo principal</p>
             <div style={{ display: "flex", gap: 6 }}>
-              <input value={iconeNovo} onChange={e => setIconeNovo(e.target.value)} placeholder="Emoji" className="input" style={{ width: 70 }} maxLength={2} />
-              <button onClick={handleCriarProduto} className="btn btn-primary btn-sm">Adicionar</button>
+              <input
+                value={novoNome}
+                onChange={(e) => setNovoNome(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && criarPrincipal()}
+                placeholder="Ex.: Nota fiscal"
+                className="input"
+                style={{ flex: 1 }}
+              />
+              <input type="color" value={novaCor} onChange={(e) => setNovaCor(e.target.value)} style={{ width: 38, height: 38, border: "none", borderRadius: 8, cursor: "pointer", padding: 2, flexShrink: 0 }} title="Cor do grupo" />
+              <button onClick={criarPrincipal} className="btn btn-primary btn-sm">Adicionar</button>
             </div>
           </div>
         </div>
@@ -110,9 +254,8 @@ export default function GestaoUsuariosPage({ onVoltar }) {
             <h3 style={{ margin: "0 0 16px", color: "var(--text)", fontSize: 15, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
               <IoPeopleOutline size={17} /> Usuários
             </h3>
-
             <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 280, overflowY: "auto" }}>
-              {usuarios.map(u => (
+              {usuarios.map((u) => (
                 <div
                   key={u.email}
                   onClick={() => selecionarUsuario(u)}
@@ -138,31 +281,31 @@ export default function GestaoUsuariosPage({ onVoltar }) {
 
           {selecionado && (
             <div className="card" style={{ padding: 20, marginTop: 16 }}>
-              <p style={{ margin: "0 0 12px", fontWeight: 700, fontSize: 14, color: "var(--text)" }}>
-                Produtos de <span style={{ color: "var(--primary)" }}>{selecionado.nome}</span>
+              <p style={{ margin: "0 0 4px", fontWeight: 700, fontSize: 14, color: "var(--text)" }}>
+                Grupos de <span style={{ color: "var(--primary)" }}>{selecionado.nome}</span>
               </p>
 
               {selecionado.isAdmin ? (
-                <p style={{ color: "var(--text-muted)", fontSize: 13 }}>Admin tem acesso a todos os produtos automaticamente.</p>
+                <p style={{ color: "var(--text-muted)", fontSize: 13 }}>Admin tem acesso a todos os grupos automaticamente.</p>
               ) : (
                 <>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
-                    {produtos.map(p => (
-                      <button
-                        key={p.id}
-                        onClick={() => toggleProduto(p.id)}
-                        className={`chip ${produtosUsuario.includes(p.id) ? "chip-active" : ""}`}
-                        style={{ background: produtosUsuario.includes(p.id) ? p.cor : undefined, color: produtosUsuario.includes(p.id) ? "white" : undefined }}
+                  <p style={{ margin: "0 0 12px", fontSize: 12, color: "var(--text-muted)" }}>
+                    Marcar um grupo libera também todos os subgrupos dele.
+                  </p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 2, maxHeight: 260, overflowY: "auto", marginBottom: 14 }}>
+                    {planas.map((g) => (
+                      <label
+                        key={g.id}
+                        style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 8px", paddingLeft: 8 + g.nivel * 18, borderRadius: 6, cursor: "pointer", fontSize: 13, color: "var(--text)", background: gruposUsuario.includes(g.id) ? "var(--primary-soft)" : "transparent" }}
                       >
-                        <LogoProduto icone={p.icone} nome={p.nome} cor={p.cor} size="sm" />
-                      </button>
+                        <input type="checkbox" checked={gruposUsuario.includes(g.id)} onChange={() => alternarGrupoUsuario(g.id)} />
+                        <span style={{ fontWeight: g.nivel === 0 ? 700 : 400 }}>{g.nome}</span>
+                      </label>
                     ))}
                   </div>
-
-                  <button onClick={salvarProdutos} disabled={salvando} className="btn btn-primary btn-sm">
+                  <button onClick={salvarGrupos} disabled={salvando} className="btn btn-primary btn-sm">
                     <IoSaveOutline size={14} /> {salvando ? "Salvando..." : "Salvar"}
                   </button>
-                  {msg && <span className="form-message form-message-success" style={{ display: "inline-flex", marginLeft: 10 }}>{msg}</span>}
                 </>
               )}
             </div>
@@ -172,4 +315,3 @@ export default function GestaoUsuariosPage({ onVoltar }) {
     </div>
   );
 }
-
