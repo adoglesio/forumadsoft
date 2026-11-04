@@ -40,4 +40,4 @@ cd seu-repositorio
 [comando de instalação]
 
 # Configure as variáveis de ambiente
-cp .env.example .env
+cp .env.example .env# forumadsoft
