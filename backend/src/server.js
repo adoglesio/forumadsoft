@@ -40,27 +40,31 @@ app.get('/api/health', (_req, res) => {
 });
 
 // ── Rotas ─────────────────────────────────────────────────────────────────
-function safeRoute(routePath) {
+// ATENÇÃO: cada require() abaixo precisa ter o caminho como TEXTO LITERAL.
+// A Vercel só inclui no deploy os arquivos que enxerga nos require() literais;
+// com require(variavel) o arquivo da rota fica de fora do pacote e dá
+// "Cannot find module" em produção (mesmo funcionando no seu computador).
+function safeRoute(nome, carregar) {
   try {
-    return require(routePath);
+    return carregar();
   } catch (err) {
-    console.error(`Erro ao carregar rota ${routePath}:`, err.message);
-    // r.use (e não r.all('*')) funciona no Express 4 e no 5; no 5 o '*' derrubava o servidor
+    console.error(`Erro ao carregar rota ${nome}:`, err.message);
+    // r.use (e não r.all('*')) funciona no Express 4 e no 5
     const r = express.Router();
     r.use((_req, res) =>
-      res.status(500).json({ error: `Rota ${routePath} falhou ao carregar: ${err.message}` })
+      res.status(500).json({ error: `Rota ${nome} falhou ao carregar: ${err.message}` })
     );
     return r;
   }
 }
 
-app.use('/api/usuarios',      safeRoute('./routes/usuarios'));
-app.use('/api/erros',         safeRoute('./routes/erros'));
-app.use('/api/procedimentos', safeRoute('./routes/procedimentos'));
-app.use('/api/logs',          safeRoute('./routes/logs'));
-app.use('/api/reacoes',       safeRoute('./routes/reacoes'));
-app.use('/api/produtos',      safeRoute('./routes/produtos'));
-app.use('/api/admin/usuarios', safeRoute('./routes/usuariosAdmin'));
+app.use('/api/usuarios',       safeRoute('usuarios',      () => require('./routes/usuarios')));
+app.use('/api/erros',          safeRoute('erros',         () => require('./routes/erros')));
+app.use('/api/procedimentos',  safeRoute('procedimentos', () => require('./routes/procedimentos')));
+app.use('/api/logs',           safeRoute('logs',          () => require('./routes/logs')));
+app.use('/api/reacoes',        safeRoute('reacoes',       () => require('./routes/reacoes')));
+app.use('/api/produtos',       safeRoute('produtos',      () => require('./routes/produtos')));
+app.use('/api/admin/usuarios', safeRoute('usuariosAdmin', () => require('./routes/usuariosAdmin')));
 
 // ── Estatísticas ──────────────────────────────────────────────────────────
 app.get('/api/estatisticas', async (req, res) => {
