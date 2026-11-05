@@ -66,6 +66,35 @@ app.use('/api/reacoes',        safeRoute('reacoes',       () => require('./route
 app.use('/api/produtos',       safeRoute('produtos',      () => require('./routes/produtos')));
 app.use('/api/admin/usuarios', safeRoute('usuariosAdmin', () => require('./routes/usuariosAdmin')));
 
+// ── Diagnóstico (abra no navegador: /api/diagnostico) ────────────────────
+// Mostra se as variáveis existem e se o banco responde. Não revela senha nem
+// o endereço do banco. Pode apagar este bloco quando tudo estiver funcionando.
+app.get('/api/diagnostico', async (_req, res) => {
+  const url = process.env.DATABASE_URL || '';
+  const host = (url.match(/@([^:/?]+)/) || [])[1] || '';
+  const porta = (url.match(/@[^:/?]+:(\d+)/) || [])[1] || null;
+  const info = {
+    DATABASE_URL_definida: !!url,
+    tipo_de_conexao: !url ? null
+      : host.includes('pooler.supabase.com') ? 'pooler (recomendado para a Vercel)'
+      : /^db\..+\.supabase\.co$/.test(host) ? 'direta (pode falhar na Vercel)'
+      : 'outra',
+    porta,
+    FRONTEND_URL_definida: !!process.env.FRONTEND_URL,
+    NODE_ENV,
+  };
+  try {
+    const { query } = require('./db/database');
+    const r = await query('SELECT COUNT(*)::int AS total FROM usuarios');
+    info.banco = 'OK';
+    info.usuarios_cadastrados = r[0].total;
+  } catch (e) {
+    info.banco = 'ERRO';
+    info.erro = host ? String(e.message).split(host).join('***') : String(e.message);
+  }
+  res.json(info);
+});
+
 // ── Estatísticas ──────────────────────────────────────────────────────────
 app.get('/api/estatisticas', async (req, res) => {
   try {
